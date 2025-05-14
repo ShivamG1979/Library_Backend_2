@@ -264,57 +264,101 @@ export const processBookReturn = async (req, res) => {
 
 // Get statistics for admin dashboard
 export const getLibraryStatistics = async (req, res) => {
-    try {
-        const totalBooks = await Book.countDocuments();
-        const availableBooks = await Book.countDocuments({ available: true });
-        const borrowedBooks = await Book.countDocuments({ available: false });
-        const totalUsers = await User.countDocuments({ role: 'user' });
-        const pendingRequests = await BookRequest.countDocuments({ status: 'pending' });
-        
-        // Recent activities (last 20)
-        const recentActivity = await BookRequest.find()
-            .populate('book', 'title')
-            .populate('user', 'username')
-            .sort({ createdAt: -1 })
-            .limit(20)
-            .select('book user status createdAt');
-        
-        // Books due soon (in next 7 days)
-        const today = new Date();
-        const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-        
-        const booksDueSoon = await BookRequest.find({
-            status: 'approved',
-            dueDate: { $gte: today, $lte: nextWeek }
-        })
-            .populate('book', 'title')
-            .populate('user', 'username email')
-            .sort({ dueDate: 1 });
-        
-        // Overdue books
-        const overdueBooks = await BookRequest.find({
-            status: 'approved',
-            dueDate: { $lt: today }
-        })
-            .populate('book', 'title')
-            .populate('user', 'username email')
-            .sort({ dueDate: 1 });
-        
-        res.json({
-            totalBooks,
-            availableBooks,
-            borrowedBooks,
-            totalUsers,
-            pendingRequests,
-            recentActivity,
-            booksDueSoon,
-            overdueBooks
-        });
-    } catch (error) {
-        console.error('Error fetching library statistics:', error);
-        res.status(500).json({ message: 'Internal server error' });
-    }
+  try {
+    const totalBooks = await Book.countDocuments();
+    const availableBooks = await Book.countDocuments({ available: true });
+    const borrowedBooks = await Book.countDocuments({ available: false });
+    const totalUsers = await User.countDocuments({ role: 'user' });
+    const pendingRequests = await BookRequest.countDocuments({ status: 'pending' });
+
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+    // Count books borrowed this month
+    const borrowedThisMonth = await BookRequest.countDocuments({
+      status: 'approved',
+      createdAt: { $gte: startOfMonth, $lte: endOfMonth }
+    });
+
+    // Count books returned this month
+    const returnedThisMonth = await BookRequest.countDocuments({
+      status: 'returned',
+      updatedAt: { $gte: startOfMonth, $lte: endOfMonth }
+    });
+
+    const recentActivity = await BookRequest.find()
+      .populate('book', 'title')
+      .populate('user', 'username')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select('book user status createdAt');
+
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const booksDueSoon = await BookRequest.find({
+      status: 'approved',
+      dueDate: { $gte: today, $lte: nextWeek }
+    })
+      .populate('book', 'title')
+      .populate('user', 'username email')
+      .sort({ dueDate: 1 });
+
+    const overdueBooks = await BookRequest.find({
+      status: 'approved',
+      dueDate: { $lt: today }
+    })
+      .populate('book', 'title')
+      .populate('user', 'username email')
+      .sort({ dueDate: 1 });
+
+    // Optional: Count users with active borrow
+    const activeBorrowers = await BookRequest.distinct('user', { status: 'approved' });
+
+    // Optional: Most popular books
+    const popularBooks = await BookRequest.aggregate([
+      { $match: { status: 'approved' } },
+      { $group: { _id: '$book', borrowCount: { $sum: 1 } } },
+      { $sort: { borrowCount: -1 } },
+      { $limit: 5 },
+      {
+        $lookup: {
+          from: 'books',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'bookInfo'
+        }
+      },
+      { $unwind: '$bookInfo' },
+      {
+        $project: {
+          _id: 1,
+          title: '$bookInfo.title',
+          borrowCount: 1
+        }
+      }
+    ]);
+
+    res.json({
+      totalBooks,
+      availableBooks,
+      borrowedBooks,
+      totalUsers,
+      pendingRequests,
+      borrowedThisMonth,
+      returnedThisMonth,
+      recentActivity,
+      booksDueSoon,
+      overdueBooks,
+      popularBooks,
+      activeBorrowers: activeBorrowers.length
+    });
+  } catch (error) {
+    console.error('Error fetching library statistics:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
+
 
 // Add User
 export const addUser = async (req, res) => {

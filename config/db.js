@@ -15,7 +15,7 @@ const connectDB = async () => {
         // If this specific admin doesn't exist, create one
         if (!adminExists) {
             console.log('Creating specified admin user...');
-            
+               
             // Admin credentials as specified
             const adminUsername = 'shiva';
             const password = '9907714067';
